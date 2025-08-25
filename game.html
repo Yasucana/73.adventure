@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Puzzle Adventure: Lost Treasure</title>
+    <style>
+        body { font-family: monospace; background: #222; color: #fff; text-align: center; margin: 0; padding: 0; }
+        #game { width: 800px; height: 600px; margin: auto; position: relative; background: #000; border: 2px solid #fff; image-rendering: pixelated; }
+        #scene { width: 100%; height: 400px; background: #333; position: relative; }
+        .object { position: absolute; cursor: pointer; background: #888; padding: 5px; border: 1px solid #fff; }
+        #inventory { height: 100px; background: #444; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; }
+        .item { width: 50px; height: 50px; margin: 5px; background: #666; cursor: pointer; text-align: center; line-height: 50px; border: 1px solid #fff; }
+        #narrative { height: 100px; background: #555; padding: 10px; overflow-y: auto; }
+        #hint { position: absolute; bottom: 110px; right: 10px; padding: 5px; background: #777; cursor: pointer; }
+        .selected { border: 2px solid yellow; }
+        #modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 10; }
+        #modal-content { width: 400px; height: 300px; margin: 100px auto; background: #444; padding: 20px; border: 1px solid #fff; }
+        #close-modal { cursor: pointer; float: right; }
+    </style>
+</head>
+<body>
+    <div id="game">
+        <div id="scene"></div>
+        <div id="inventory"></div>
+        <div id="narrative">Welcome to the Enchanted Kingdom. Search for the lost treasure...</div>
+        <div id="hint" onclick="showHint()">Hint</div>
+    </div>
+    <div id="modal">
+        <div id="modal-content">
+            <span id="close-modal" onclick="closeModal()">&times;</span>
+            <div id="modal-body"></div>
+        </div>
+    </div>
+    <script>
+        // Game state
+        let currentScene = 'start';
+        let inventory = [];
+        let maxInventory = 10;
+        let selectedItem = null;
+        let secondSelectedItem = null; // For combining items
+        let puzzlesSolved = 0;
+        let hintLevel = 0;
+        let mapViewed = false; // Flag for map viewing
+
+        // Scene definitions (pixel art style placeholders)
+        const scenes = {
+            start: {
+                bg: 'Forest Entrance (Pixel Background)',
+                objects: [
+                    { id: 'map', pos: 'left:100px;top:100px;', desc: 'Found a map!', action: () => addItem('map') },
+                    { id: 'door', pos: 'left:400px;top:200px;', desc: 'The door is locked', action: () => useItemOn('key', 'Door opened! Moving to the forest', 'forest') }
+                ],
+                narrative: 'You wandered into the kingdom. Find the map. Viewing it might reveal something...'
+            },
+            forest: {
+                bg: 'Deep Forest (Pixel Background)',
+                objects: [
+                    { id: 'note', pos: 'left:200px;top:150px;', desc: 'Note: Combine the stick and rope to make a tool for climbing.', action: () => addItem('note') },
+                    { id: 'stick', pos: 'left:300px;top:250px;', desc: 'Found a stick', action: () => addItem('stick') },
+                    { id: 'rope', pos: 'left:500px;top:100px;', desc: 'Found a rope', action: () => addItem('rope') },
+                    { id: 'tree', pos: 'left:600px;top:50px;', desc: 'A tall tree with something hidden up top', action: () => useItemOn('climbing tool', 'Climbed the tree! Found a hidden key.', null, () => addItem('hidden key')) },
+                    { id: 'exit door', pos: 'left:700px;top:200px;', desc: 'The exit door to the treasure', action: () => useItemOn('hidden key', 'Exit door opened! You found the treasure.', null, () => { puzzlesSolved = 10; checkWin(); }) }
+                ],
+                narrative: 'In the forest. Use hints to create tools. An ancient spirit left this note.'
+            },
+            // Additional scenes can be added if needed, but for simplicity, clearing in forest
+        };
+
+        // Item list
+        const items = ['key', 'note', 'map', 'pen', 'screw', 'stick', 'handle', 'battery', 'flashlight', 'rope', 'hidden key', 'climbing tool'];
+
+        // Function: Render scene
+        function renderScene() {
+            const scene = scenes[currentScene];
+            document.getElementById('scene').innerHTML = `<div style="width:100%;height:100%;background:#333;">${scene.bg}</div>`;
+            scene.objects.forEach(obj => {
+                const el = document.createElement('div');
+                el.className = 'object';
+                el.style = obj.pos;
+                el.innerText = obj.id;
+                el.onclick = obj.action;
+                document.getElementById('scene').appendChild(el);
+            });
+            // After viewing map, add hidden door in start scene
+            if (mapViewed && currentScene === 'start') {
+                const hiddenDoor = document.createElement('div');
+                hiddenDoor.className = 'object';
+                hiddenDoor.style = 'left:600px;top:300px;';
+                hiddenDoor.innerText = 'hidden door';
+                hiddenDoor.onclick = () => {
+                    updateNarrative('Hidden door opened! Proceeding to forest.');
+                    currentScene = 'forest';
+                    renderScene();
+                    puzzlesSolved++;
+                    checkWin();
+                };
+                document.getElementById('scene').appendChild(hiddenDoor);
+            }
+            document.getElementById('narrative').innerHTML = scene.narrative;
+        }
+
+        // Function: Add item
+        function addItem(item) {
+            if (inventory.length < maxInventory && !inventory.includes(item)) {
+                inventory.push(item);
+                renderInventory();
+                updateNarrative(`Acquired "${item}".`);
+                if (item === 'note') {
+                    updateNarrative('Hint on note: Combine the stick and rope to make a tool for climbing.');
+                }
+                puzzlesSolved++;
+                checkWin();
+            } else {
+                updateNarrative('Inventory full or already have it.');
+            }
+        }
+
+        // Function: Render inventory
+        function renderInventory() {
+            const inv = document.getElementById('inventory');
+            inv.innerHTML = '';
+            inventory.forEach(item => {
+                const el = document.createElement('div');
+                el.className = 'item';
+                el.innerText = item[0].toUpperCase(); // Pixel-style initial
+                el.onclick = () => {
+                    if (item === 'map') {
+                        showMapDetail();
+                    } else {
+                        selectItem(item);
+                    }
+                };
+                if (selectedItem === item || secondSelectedItem === item) el.classList.add('selected');
+                inv.appendChild(el);
+            });
+        }
+
+        // Function: Show map detail
+        function showMapDetail() {
+            document.getElementById('modal-body').innerHTML = 'Map details: Hidden path at forest entrance. Ancient marks indicate... (Pixel art map image)';
+            document.getElementById('modal').style.display = 'block';
+            mapViewed = true; // Set flag
+            updateNarrative('Viewed the map. Something might change...');
+            puzzlesSolved++;
+            checkWin();
+            renderScene(); // Reflect hidden door immediately
+        }
+
+        // Function: Close modal
+        function closeModal() {
+            document.getElementById('modal').style.display = 'none';
+        }
+
+        // Function: Select item (support combination)
+        function selectItem(item) {
+            if (selectedItem === null) {
+                selectedItem = item;
+            } else if (secondSelectedItem === null && item !== selectedItem) {
+                secondSelectedItem = item;
+                tryCombine();
+            } else {
+                selectedItem = null;
+                secondSelectedItem = null;
+            }
+            renderInventory();
+        }
+
+        // Function: Try combining items
+        function tryCombine() {
+            if ((selectedItem === 'stick' && secondSelectedItem === 'rope') || (selectedItem === 'rope' && secondSelectedItem === 'stick')) {
+                // Remove stick and rope, add climbing tool
+                inventory = inventory.filter(i => i !== 'stick' && i !== 'rope');
+                addItem('climbing tool');
+                updateNarrative('Combined stick and rope into a climbing tool!');
+                puzzlesSolved++;
+                checkWin();
+            } else {
+                updateNarrative('These items don\'t combine.');
+            }
+            selectedItem = null;
+            secondSelectedItem = null;
+        }
+
+        // Function: Use item on object (with optional callback)
+        function useItemOn(required, successMsg, nextScene, callback = null) {
+            if (selectedItem === required) {
+                updateNarrative(successMsg);
+                if (nextScene) currentScene = nextScene;
+                if (callback) callback();
+                renderScene();
+                puzzlesSolved++;
+                checkWin();
+            } else {
+                updateNarrative('Doesn\'t fit.');
+            }
+        }
+
+        // Function: Update narrative
+        function updateNarrative(text) {
+            document.getElementById('narrative').innerHTML += '<br>' + text;
+        }
+
+        // Function: Show hint
+        function showHint() {
+            hintLevel++;
+            let hint = hintLevel === 1 ? 'Vague hint: Combine items.' : 'Specific: Try stick and rope...';
+            updateNarrative(hint);
+            if (hintLevel > 2) hintLevel = 0;
+        }
+
+        // Function: Check win
+        function checkWin() {
+            if (puzzlesSolved >= 10) {
+                updateNarrative('Congratulations! Found the treasure and saved the kingdom.');
+            }
+        }
+
+        // Initialization
+        renderScene();
+        renderInventory();
+    </script>
+</body>
+</html>
